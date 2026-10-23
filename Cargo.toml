@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/soroban-fuzz-core",
+]
+
+[workspace.package]
+version = "0.1.0"
+authors = ["OrderStream <orderstream@users.noreply.github.com>"]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/OrderStream/soroban-fuzz"
+keywords = ["stellar", "soroban", "fuzzing", "security", "invariants"]
+categories = ["development-tools::testing", "cryptography::cryptocurrencies"]
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.test]
+opt-level = 0
+debug = true
