@@ -147,9 +147,45 @@ test test_deterministic_fuzz_campaigns ... ok
 
 ---
 
+## ⚡ Cloud Fuzzing-as-a-Service & Commercial Compliance Audits
+
+Local invariant fuzzing is great for development, but enterprise DeFi protocols on Stellar require millions of continuous fuzz iterations across distributed CPU clusters to guarantee protocol solvency and state survival under adverse conditions.
+
+### Pricing & Commercial Packages
+
+| Offering | Target | Pricing | Invariant Depth & Deliverables |
+|---|---|---|---|
+| **Community Core** | Open-source devs | **Free ($0)** | Local harness, 3 core invariants, CLI test runs |
+| **Protocol Audit Run** | Pre-deployment DeFi | **$499 / run** | 1,000,000 continuous invariant iterations, storage eviction stress test, signed `AuditCertificate` (JSON + Markdown) |
+| **Continuous Cloud Fuzzing (CI/CD)** | Live Stellar Protocols | **$1,200 / month** | Continuous PR fuzzing on distributed cloud workers (10M+ steps), automated regression prevention, real-time alert webhooks |
+| **Ecosystem Security Retainer** | Institutional protocols | **$3,500 / month** | Custom invariant authoring, cross-contract reentrancy and flash-loan simulation, dedicated audit reporting |
+
+### Cryptographic Audit Certificate Example
+
+Every automated fuzz campaign emits an immutable, SHA-256 fingerprinted certificate:
+
+```rust
+use soroban_fuzz_core::{AuditCertificate, FuzzInvariantHarness};
+
+let cert = AuditCertificate::generate(
+    "AquaLend Protocol",
+    "CC3W...7XYZ",
+    "stellar-mainnet",
+    harness.state.ledger_sequence,
+    &harness.step_history,
+);
+
+// Exports institutional Markdown security report
+let report = cert.to_markdown_report();
+assert!(cert.verify_integrity());
+```
+
+---
+
 ## 📜 License
 
 Licensed under either of:
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
 - MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
 at your option.
+

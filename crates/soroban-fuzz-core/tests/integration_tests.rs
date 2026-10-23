@@ -495,3 +495,34 @@ fn test_soroban_env_host_direct_hook() {
     assert_eq!(harness.env.ledger().sequence(), 21);
     assert_eq!(harness.current_ledger().sequence_number, 21);
 }
+
+#[test]
+fn test_audit_certificate_generation_and_integrity() {
+    use soroban_fuzz_core::{AuditCertificate, CertificateStatus, DeterministicFuzzer};
+
+    let mut harness = FuzzInvariantHarness::new();
+    let mut fuzzer = DeterministicFuzzer::new(0xDEADBEEF);
+    for _ in 0..50 {
+        let action = fuzzer.next_action(&harness.state);
+        harness.step(action);
+    }
+
+    let cert = AuditCertificate::generate(
+        "AquaLend Protocol",
+        "CC3W...7XYZ",
+        "stellar-mainnet",
+        harness.state.ledger_sequence,
+        &harness.step_history,
+    );
+
+    assert_eq!(cert.protocol_name, "AquaLend Protocol");
+    assert_eq!(cert.total_steps_executed, 50);
+    assert_eq!(cert.status, CertificateStatus::CertifiedSecure);
+    assert!(cert.verify_integrity());
+
+    let md = cert.to_markdown_report();
+    assert!(md.contains("AquaLend Protocol"));
+    assert!(md.contains("CERTIFIED SECURE"));
+    assert!(md.contains(&cert.cryptographic_fingerprint));
+}
+

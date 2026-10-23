@@ -10,6 +10,7 @@
 pub mod harness;
 pub mod invariants;
 pub mod ledger;
+pub mod report;
 pub mod storage;
 
 pub use harness::{DeterministicFuzzer, FuzzAction, FuzzInvariantHarness, FuzzStepResult};
@@ -19,6 +20,7 @@ pub use invariants::{
     ViolationSeverity,
 };
 pub use ledger::{LedgerAdvancementHook, LedgerSnapshot};
+pub use report::{AuditCertificate, CertificateStatus};
 pub use storage::{
     EvictionEvent, StorageEntry, StorageError, StorageTtlManager, StorageType,
 };
