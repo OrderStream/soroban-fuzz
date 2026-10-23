@@ -152,7 +152,7 @@ impl InvariantEngine {
     pub fn standard() -> Self {
         let mut engine = Self::new();
         engine.register(SolvencyInvariant::default());
-        engine.register(TotalSupplyConservationInvariant::default());
+        engine.register(TotalSupplyConservationInvariant);
         engine.register(ReplayNonceMonotonicityInvariant::default());
         engine
     }

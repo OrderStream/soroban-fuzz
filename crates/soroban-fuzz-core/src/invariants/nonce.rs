@@ -28,7 +28,11 @@ impl Invariant for ReplayNonceMonotonicityInvariant {
     }
 
     fn check(&self, state: &FuzzState) -> Result<(), InvariantViolation> {
-        for (address, history) in &state.nonce_history {
+        let mut addresses: Vec<&String> = state.nonce_history.keys().collect();
+        addresses.sort();
+
+        for address in addresses {
+            let history = &state.nonce_history[address];
             if history.len() <= 1 {
                 continue;
             }

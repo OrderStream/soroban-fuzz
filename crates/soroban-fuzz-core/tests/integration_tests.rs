@@ -59,7 +59,7 @@ fn test_storage_ttl_boundary_temporary() {
     assert_eq!(harness.state.ledger_sequence, 12);
     assert_eq!(evictions.len(), 1);
     assert_eq!(evictions[0].key, "session_token");
-    assert_eq!(evictions[0].permanently_deleted, true);
+    assert!(evictions[0].permanently_deleted);
 
     // Access must fail with Evicted error
     let err = harness
@@ -104,7 +104,7 @@ fn test_storage_ttl_boundary_persistent_and_restoration() {
     assert_eq!(harness.state.ledger_sequence, 22);
     assert_eq!(evictions.len(), 1);
     assert_eq!(evictions[0].key, "user_vault_state");
-    assert_eq!(evictions[0].permanently_deleted, false); // Persistent is archived, not destroyed
+    assert!(!evictions[0].permanently_deleted); // Persistent is archived, not destroyed
 
     // Direct get fails with Expired
     let err = harness
@@ -127,7 +127,7 @@ fn test_storage_ttl_boundary_persistent_and_restoration() {
         .get_storage(StorageType::Persistent, "user_vault_state")
         .expect("Should be active after restoration");
     assert_eq!(entry.live_until_ledger, 22 + 50);
-    assert_eq!(entry.is_archived, false);
+    assert!(!entry.is_archived);
 }
 
 #[test]
@@ -368,4 +368,130 @@ fn test_fuzz_invariant_engine_custom_registration() {
     state.total_assets = 600;
     let report_ok = engine.evaluate_all(&state);
     assert!(report_ok.passed);
+}
+
+#[test]
+fn test_storage_ttl_extension_max_bounds() {
+    let mut harness = FuzzInvariantHarness::new();
+    harness.step(FuzzAction::StoragePut {
+        storage_type: StorageType::Instance,
+        key: "config".to_string(),
+        val: b"val".to_vec(),
+        ttl: Some(100),
+    });
+
+    // Attempting to extend TTL beyond max_entry_ttl must fail
+    let err = harness
+        .storage
+        .extend_ttl(
+            StorageType::Instance,
+            "config",
+            1,
+            harness.storage.max_entry_ttl + 1,
+        )
+        .expect_err("Should fail when extend_by > max_entry_ttl");
+    assert!(matches!(err, StorageError::InvalidTtl { .. }));
+}
+
+#[test]
+fn test_storage_ttl_extension_expired_persistent_rejected() {
+    let mut harness = FuzzInvariantHarness::new();
+    // Persistent key expiring at ledger 11
+    harness.step(FuzzAction::StoragePut {
+        storage_type: StorageType::Persistent,
+        key: "vault".to_string(),
+        val: b"data".to_vec(),
+        ttl: Some(10),
+    });
+
+    // Advance to ledger 12 (entry is now expired / archived)
+    harness.advance_ledger(11);
+    assert_eq!(harness.state.ledger_sequence, 12);
+
+    // Attempting extend_ttl on expired persistent key MUST be rejected with Expired (restore required)
+    let err = harness
+        .storage
+        .extend_ttl(StorageType::Persistent, "vault", 12, 50)
+        .expect_err("extend_ttl on expired persistent key must fail; restore required");
+    match err {
+        StorageError::Expired { live_until, .. } => assert_eq!(live_until, 11),
+        _ => panic!("Expected Expired error, got {:?}", err),
+    }
+
+    // However, restore_persistent works properly
+    let res = harness.step(FuzzAction::StorageRestore {
+        key: "vault".to_string(),
+        restore_ttl: 50,
+    });
+    assert!(res.success);
+    assert!(harness
+        .get_storage(StorageType::Persistent, "vault")
+        .is_ok());
+}
+
+#[test]
+fn test_storage_ttl_extension_active_persistent_succeeds() {
+    let mut harness = FuzzInvariantHarness::new();
+    harness.step(FuzzAction::StoragePut {
+        storage_type: StorageType::Persistent,
+        key: "active_vault".to_string(),
+        val: b"data".to_vec(),
+        ttl: Some(50),
+    });
+
+    // While still active at ledger 10: extending TTL by 100 ledgers succeeds
+    harness.advance_ledger(9);
+    assert_eq!(harness.state.ledger_sequence, 10);
+
+    let new_live_until = harness
+        .storage
+        .extend_ttl(StorageType::Persistent, "active_vault", 10, 100)
+        .expect("extend_ttl on active persistent key should succeed");
+    assert_eq!(new_live_until, 110);
+}
+
+#[test]
+fn test_eviction_deterministic_ordering() {
+    let mut harness = FuzzInvariantHarness::new();
+    // Put multiple keys that expire at the same ledger
+    harness.step(FuzzAction::StoragePut {
+        storage_type: StorageType::Temporary,
+        key: "temp_z".to_string(),
+        val: b"z".to_vec(),
+        ttl: Some(5),
+    });
+    harness.step(FuzzAction::StoragePut {
+        storage_type: StorageType::Temporary,
+        key: "temp_a".to_string(),
+        val: b"a".to_vec(),
+        ttl: Some(5),
+    });
+    harness.step(FuzzAction::StoragePut {
+        storage_type: StorageType::Temporary,
+        key: "temp_m".to_string(),
+        val: b"m".to_vec(),
+        ttl: Some(5),
+    });
+
+    // Advance past expiry
+    let (_, evictions) = harness.advance_ledger(6);
+    assert_eq!(evictions.len(), 3);
+    // Keys must be deterministically sorted
+    assert_eq!(evictions[0].key, "temp_a");
+    assert_eq!(evictions[1].key, "temp_m");
+    assert_eq!(evictions[2].key, "temp_z");
+}
+
+#[test]
+fn test_soroban_env_host_direct_hook() {
+    let mut harness = FuzzInvariantHarness::new();
+    // Harness host accessor exposes soroban-env-host Host instance directly
+    let host = harness.host();
+    // Verify host instance is accessible
+    assert!(!format!("{:?}", host).is_empty());
+
+    // Verify ledger advancement updates both harness env and ledger hook
+    harness.advance_ledger(20);
+    assert_eq!(harness.env.ledger().sequence(), 21);
+    assert_eq!(harness.current_ledger().sequence_number, 21);
 }

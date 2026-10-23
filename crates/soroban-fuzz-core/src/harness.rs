@@ -124,6 +124,11 @@ impl FuzzInvariantHarness {
         self.ledger_hook.snapshot()
     }
 
+    /// Direct access to the underlying soroban-env-host Host instance.
+    pub fn host(&self) -> &soroban_env_host::Host {
+        self.env.host()
+    }
+
     /// Advances the Soroban host ledger sequence and timestamp, updates the Soroban Env,
     /// performs automated storage TTL eviction checks, and updates state.
     pub fn advance_ledger(&mut self, delta_ledgers: u32) -> (LedgerSnapshot, Vec<EvictionEvent>) {
@@ -370,18 +375,26 @@ impl DeterministicFuzzer {
 
     /// Generates a valid or boundary-probing fuzz action based on current system state.
     pub fn next_action(&mut self, current_state: &FuzzState) -> FuzzAction {
-        let action_choice = self.gen_range_u32(0, 8);
+        let action_choice = self.gen_range_u32(0, 13);
         match action_choice {
             0 => FuzzAction::AdvanceLedger {
                 delta_ledgers: self.gen_range_u32(1, 20),
             },
             1 => {
+                let delta_ledgers = self.gen_range_u32(1, 10);
+                let delta_seconds = (delta_ledgers as u64) * 5 + (self.next_u64() % 10);
+                FuzzAction::AdvanceLedgerCustom {
+                    delta_ledgers,
+                    delta_seconds,
+                }
+            }
+            2 => {
                 let user_idx = self.gen_range_u32(0, 5);
                 let user = format!("user_{}", user_idx);
                 let amount = self.gen_range_i128(100, 5_000);
                 FuzzAction::Mint { to: user, amount }
             }
-            2 => {
+            3 => {
                 let from_idx = self.gen_range_u32(0, 5);
                 let to_idx = (from_idx + 1) % 5;
                 let from_user = format!("user_{}", from_idx);
@@ -398,7 +411,7 @@ impl DeterministicFuzzer {
                     amount,
                 }
             }
-            3 => {
+            4 => {
                 let user_idx = self.gen_range_u32(0, 5);
                 let user = format!("user_{}", user_idx);
                 let bal = *current_state.user_balances.get(&user).unwrap_or(&0);
@@ -409,7 +422,7 @@ impl DeterministicFuzzer {
                 };
                 FuzzAction::Burn { from: user, amount }
             }
-            4 => {
+            5 => {
                 let st_choice = self.gen_range_u32(0, 3);
                 let storage_type = match st_choice {
                     0 => StorageType::Temporary,
@@ -427,7 +440,43 @@ impl DeterministicFuzzer {
                     ttl: Some(ttl),
                 }
             }
-            5 => {
+            6 => {
+                let st_choice = self.gen_range_u32(0, 3);
+                let storage_type = match st_choice {
+                    0 => StorageType::Temporary,
+                    1 => StorageType::Instance,
+                    _ => StorageType::Persistent,
+                };
+                let key_idx = self.gen_range_u32(0, 10);
+                FuzzAction::StorageGet {
+                    storage_type,
+                    key: format!("storage_key_{}", key_idx),
+                }
+            }
+            7 => {
+                let st_choice = self.gen_range_u32(0, 2);
+                let storage_type = if st_choice == 0 {
+                    StorageType::Temporary
+                } else {
+                    StorageType::Instance
+                };
+                let key_idx = self.gen_range_u32(0, 10);
+                let extend_by = self.gen_range_u32(10, 50);
+                FuzzAction::StorageExtendTtl {
+                    storage_type,
+                    key: format!("storage_key_{}", key_idx),
+                    extend_by,
+                }
+            }
+            8 => {
+                let key_idx = self.gen_range_u32(0, 10);
+                let restore_ttl = self.gen_range_u32(20, 100);
+                FuzzAction::StorageRestore {
+                    key: format!("storage_key_{}", key_idx),
+                    restore_ttl,
+                }
+            }
+            9 => {
                 let sender_idx = self.gen_range_u32(0, 3);
                 let sender = format!("sender_{}", sender_idx);
                 let cur_nonce = *current_state.nonces.get(&sender).unwrap_or(&0);
@@ -436,15 +485,17 @@ impl DeterministicFuzzer {
                     nonce: cur_nonce + 1,
                 }
             }
-            6 => {
+            10 => {
                 let asset = self.gen_range_i128(500, 3_000);
                 FuzzAction::DepositCollateral {
                     user: "alice".to_string(),
                     asset_amount: asset,
                 }
             }
-            _ => {
-                let max_borrow = current_state.total_assets.saturating_sub(current_state.total_liabilities);
+            11 => {
+                let max_borrow = current_state
+                    .total_assets
+                    .saturating_sub(current_state.total_liabilities);
                 let borrow = if max_borrow > 100 {
                     self.gen_range_i128(50, max_borrow / 2)
                 } else {
@@ -453,6 +504,17 @@ impl DeterministicFuzzer {
                 FuzzAction::BorrowLiability {
                     user: "bob".to_string(),
                     borrow_amount: borrow,
+                }
+            }
+            _ => {
+                let repay = if current_state.total_liabilities > 0 {
+                    self.gen_range_i128(1, current_state.total_liabilities.min(500))
+                } else {
+                    0
+                };
+                FuzzAction::RepayLiability {
+                    user: "bob".to_string(),
+                    repay_amount: repay,
                 }
             }
         }

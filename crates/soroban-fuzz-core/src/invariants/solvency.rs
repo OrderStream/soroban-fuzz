@@ -60,7 +60,8 @@ impl Invariant for SolvencyInvariant {
         }
 
         // assets * 10_000 >= liabilities * min_solvency_ratio_bps
-        let lhs = (state.total_assets as i128)
+        let lhs = state
+            .total_assets
             .checked_mul(10_000)
             .ok_or_else(|| InvariantViolation {
                 invariant_name: self.name().to_string(),
@@ -72,7 +73,8 @@ impl Invariant for SolvencyInvariant {
                 severity: ViolationSeverity::Fatal,
             })?;
 
-        let rhs = (state.total_liabilities as i128)
+        let rhs = state
+            .total_liabilities
             .checked_mul(self.min_solvency_ratio_bps as i128)
             .ok_or_else(|| InvariantViolation {
                 invariant_name: self.name().to_string(),

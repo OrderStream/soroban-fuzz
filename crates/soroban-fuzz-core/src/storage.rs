@@ -212,12 +212,30 @@ impl StorageTtlManager {
             storage_type,
         })?;
 
+        if extend_by_ledgers > self.max_entry_ttl {
+            return Err(StorageError::InvalidTtl {
+                requested_ttl: extend_by_ledgers,
+                min_ttl: self.min_persistent_ttl,
+                max_ttl: self.max_entry_ttl,
+            });
+        }
+
         // Temporary storage cannot be restored if already expired (evicted)
         if storage_type == StorageType::Temporary && entry.is_expired(current_ledger) {
             return Err(StorageError::Evicted {
                 key: key.to_string(),
                 storage_type,
                 evicted_at_ledger: entry.live_until_ledger,
+                current_ledger,
+            });
+        }
+
+        // Persistent storage cannot be extended if already expired/archived; it must be restored
+        if storage_type == StorageType::Persistent && (entry.is_expired(current_ledger) || entry.is_archived) {
+            return Err(StorageError::Expired {
+                key: key.to_string(),
+                storage_type,
+                live_until: entry.live_until_ledger,
                 current_ledger,
             });
         }
@@ -298,6 +316,13 @@ impl StorageTtlManager {
         for ck in keys_to_remove {
             self.entries.remove(&ck);
         }
+
+        // Guarantee deterministic order across runs
+        new_evictions.sort_by(|a, b| {
+            a.live_until_ledger
+                .cmp(&b.live_until_ledger)
+                .then_with(|| a.key.cmp(&b.key))
+        });
 
         self.eviction_history.extend(new_evictions.clone());
         new_evictions
