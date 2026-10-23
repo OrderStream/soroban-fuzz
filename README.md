@@ -1,6 +1,6 @@
 # soroban-fuzz 🦀
 
-[![Crates.io](https://img.shields.io/badge/crates.io-v0.1.0-orange.svg)](https://crates.io/crates/soroban-fuzz-core)
+[![Crates.io](https://img.shields.io/crates/v/soroban-fuzz-core.svg)](https://crates.io/crates/soroban-fuzz-core)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.80%2B-blue.svg)](https://www.rust-lang.org)
 [![Stellar Protocol](https://img.shields.io/badge/stellar-protocol%2022-brightgreen.svg)](https://soroban.stellar.org)
@@ -67,11 +67,17 @@ soroban-fuzz/
 
 ## 🚀 Quickstart
 
-Add to `Cargo.toml`:
+Add via cargo:
+
+```bash
+cargo add --dev soroban-fuzz-core
+```
+
+Or add to your contract's `Cargo.toml`:
 
 ```toml
 [dev-dependencies]
-soroban-fuzz-core = { version = "0.1.0" }
+soroban-fuzz-core = "0.1.0"
 ```
 
 ### Running an Automated Invariant Fuzz Campaign
