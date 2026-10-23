@@ -68,17 +68,19 @@ impl AuditCertificate {
             CertificateStatus::ViolationsDetected
         };
 
-        // Compute deterministic SHA-256 fingerprint over audit metrics
-        let mut hasher = Sha256::new();
-        hasher.update(protocol_name.as_bytes());
-        hasher.update(contract_id.as_bytes());
-        hasher.update(target_network.as_bytes());
-        hasher.update(&history.len().to_be_bytes());
-        hasher.update(&total_ledgers.to_be_bytes());
-        hasher.update(&total_evictions.to_be_bytes());
-        hasher.update(&(violations.len() as u64).to_be_bytes());
-        let hash_bytes = hasher.finalize();
-        let cryptographic_fingerprint = format!("{:x}", hash_bytes);
+        let cryptographic_fingerprint = Self::compute_fingerprint(
+            &protocol_name,
+            &contract_id,
+            &target_network,
+            history.len() as u64,
+            total_ledgers as u64,
+            total_evictions as u64,
+            solvency_ok,
+            supply_ok,
+            nonce_ok,
+            &status,
+            &violations,
+        );
 
         let certificate_id = format!(
             "CERT-SOROBAN-{}-{}",
@@ -103,19 +105,77 @@ impl AuditCertificate {
         }
     }
 
-    /// Verifies that the certificate's cryptographic fingerprint matches its internal metrics.
-    pub fn verify_integrity(&self) -> bool {
+    /// Computes deterministic SHA-256 fingerprint over all critical audit metrics, status, and findings.
+    fn compute_fingerprint(
+        protocol_name: &str,
+        contract_id: &str,
+        target_network: &str,
+        total_steps: u64,
+        total_ledgers: u64,
+        total_evictions: u64,
+        solvency_ok: bool,
+        supply_ok: bool,
+        nonce_ok: bool,
+        status: &CertificateStatus,
+        violations: &[InvariantViolation],
+    ) -> String {
         let mut hasher = Sha256::new();
-        hasher.update(self.protocol_name.as_bytes());
-        hasher.update(self.contract_id.as_bytes());
-        hasher.update(self.target_network.as_bytes());
-        hasher.update(&self.total_steps_executed.to_be_bytes());
-        hasher.update(&self.total_ledgers_simulated.to_be_bytes());
-        hasher.update(&self.total_storage_evictions_handled.to_be_bytes());
-        hasher.update(&(self.violations.len() as u64).to_be_bytes());
+        hasher.update(protocol_name.as_bytes());
+        hasher.update(contract_id.as_bytes());
+        hasher.update(target_network.as_bytes());
+        hasher.update(&total_steps.to_be_bytes());
+        hasher.update(&total_ledgers.to_be_bytes());
+        hasher.update(&total_evictions.to_be_bytes());
+        hasher.update(&[solvency_ok as u8, supply_ok as u8, nonce_ok as u8]);
+        match status {
+            CertificateStatus::CertifiedSecure => hasher.update(b"STATUS:CERTIFIED_SECURE"),
+            CertificateStatus::ViolationsDetected => hasher.update(b"STATUS:VIOLATIONS_DETECTED"),
+        }
+        hasher.update(&(violations.len() as u64).to_be_bytes());
+        for v in violations {
+            hasher.update(v.invariant_name.as_bytes());
+            hasher.update(v.description.as_bytes());
+            hasher.update(v.expected.as_bytes());
+            hasher.update(v.actual.as_bytes());
+            hasher.update(&(v.step as u64).to_be_bytes());
+            hasher.update(&v.ledger_sequence.to_be_bytes());
+            hasher.update(format!("{:?}", v.severity).as_bytes());
+        }
         let hash_bytes = hasher.finalize();
-        let expected = format!("{:x}", hash_bytes);
+        format!("{:x}", hash_bytes)
+    }
+
+    /// Verifies that the certificate's cryptographic fingerprint matches its internal metrics and findings.
+    pub fn verify_integrity(&self) -> bool {
+        let expected = Self::compute_fingerprint(
+            &self.protocol_name,
+            &self.contract_id,
+            &self.target_network,
+            self.total_steps_executed as u64,
+            self.total_ledgers_simulated as u64,
+            self.total_storage_evictions_handled as u64,
+            self.solvency_invariants_passed,
+            self.supply_conservation_passed,
+            self.nonce_monotonicity_passed,
+            &self.status,
+            &self.violations,
+        );
         self.cryptographic_fingerprint == expected
+    }
+
+    /// Serializes certificate into compact JSON format.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+
+    /// Serializes certificate into formatted, human-readable JSON.
+    pub fn to_json_pretty(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
+
+    /// Deserializes certificate from JSON string and validates its integrity.
+    pub fn from_json(json_str: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(json_str)
     }
 
     /// Exports certificate as formatted Markdown audit report suitable for institutional stakeholders.

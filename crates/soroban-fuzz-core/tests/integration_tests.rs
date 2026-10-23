@@ -498,7 +498,7 @@ fn test_soroban_env_host_direct_hook() {
 
 #[test]
 fn test_audit_certificate_generation_and_integrity() {
-    use soroban_fuzz_core::{AuditCertificate, CertificateStatus, DeterministicFuzzer};
+    use soroban_fuzz_core::{CertificateStatus, DeterministicFuzzer};
 
     let mut harness = FuzzInvariantHarness::new();
     let mut fuzzer = DeterministicFuzzer::new(0xDEADBEEF);
@@ -507,12 +507,10 @@ fn test_audit_certificate_generation_and_integrity() {
         harness.step(action);
     }
 
-    let cert = AuditCertificate::generate(
+    let cert = harness.generate_audit_certificate(
         "AquaLend Protocol",
         "CC3W...7XYZ",
         "stellar-mainnet",
-        harness.state.ledger_sequence,
-        &harness.step_history,
     );
 
     assert_eq!(cert.protocol_name, "AquaLend Protocol");
@@ -524,5 +522,70 @@ fn test_audit_certificate_generation_and_integrity() {
     assert!(md.contains("AquaLend Protocol"));
     assert!(md.contains("CERTIFIED SECURE"));
     assert!(md.contains(&cert.cryptographic_fingerprint));
+}
+
+#[test]
+fn test_audit_certificate_tampering_detection() {
+    use soroban_fuzz_core::{CertificateStatus, DeterministicFuzzer};
+
+    let mut harness = FuzzInvariantHarness::new();
+    let mut fuzzer = DeterministicFuzzer::new(42);
+    for _ in 0..20 {
+        let action = fuzzer.next_action(&harness.state);
+        harness.step(action);
+    }
+
+    let cert = harness.generate_audit_certificate("DefiPool", "CD...123", "testnet");
+    assert!(cert.verify_integrity());
+
+    // 1. Tampering with solvency boolean must invalidate fingerprint
+    let mut tampered_solvency = cert.clone();
+    tampered_solvency.solvency_invariants_passed = !tampered_solvency.solvency_invariants_passed;
+    assert!(!tampered_solvency.verify_integrity(), "Tampered solvency boolean should fail verification");
+
+    // 2. Tampering with status must invalidate fingerprint
+    let mut tampered_status = cert.clone();
+    tampered_status.status = CertificateStatus::ViolationsDetected;
+    assert!(!tampered_status.verify_integrity(), "Tampered status should fail verification");
+
+    // 3. Tampering with steps count must invalidate fingerprint
+    let mut tampered_steps = cert.clone();
+    tampered_steps.total_steps_executed += 100;
+    assert!(!tampered_steps.verify_integrity(), "Tampered steps should fail verification");
+}
+
+#[test]
+fn test_audit_certificate_json_roundtrip_and_violations() {
+    use soroban_fuzz_core::{CertificateStatus, FuzzAction};
+
+    let mut harness = FuzzInvariantHarness::new();
+    // Intentionally trigger a solvency violation: liabilities > assets
+    harness.step(FuzzAction::DepositCollateral {
+        user: "alice".to_string(),
+        asset_amount: 100,
+    });
+    harness.step(FuzzAction::BorrowLiability {
+        user: "alice".to_string(),
+        borrow_amount: 200,
+    });
+
+    let cert = harness.generate_audit_certificate("LendVault", "CA...999", "stellar-mainnet");
+    assert_eq!(cert.status, CertificateStatus::ViolationsDetected);
+    assert!(!cert.solvency_invariants_passed);
+    assert_eq!(cert.violations.len(), 1);
+    assert!(cert.verify_integrity());
+
+    // Verify markdown reflects failure
+    let md = cert.to_markdown_report();
+    assert!(md.contains("CRITICAL VIOLATIONS DETECTED"));
+    assert!(md.contains("BREACHED"));
+
+    // Verify JSON round-trip
+    let json_str = cert.to_json_pretty().expect("Failed to serialize certificate");
+    let deserialized = soroban_fuzz_core::AuditCertificate::from_json(&json_str)
+        .expect("Failed to deserialize certificate");
+    assert_eq!(deserialized.certificate_id, cert.certificate_id);
+    assert_eq!(deserialized.cryptographic_fingerprint, cert.cryptographic_fingerprint);
+    assert!(deserialized.verify_integrity());
 }
 

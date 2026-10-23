@@ -1,5 +1,6 @@
 use crate::invariants::{FuzzState, Invariant, InvariantEngine, InvariantReport};
 use crate::ledger::{LedgerAdvancementHook, LedgerSnapshot};
+use crate::report::AuditCertificate;
 use crate::storage::{EvictionEvent, StorageEntry, StorageError, StorageTtlManager, StorageType};
 use serde::{Deserialize, Serialize};
 use soroban_sdk::Env;
@@ -331,6 +332,22 @@ impl FuzzInvariantHarness {
             }
         }
         self.check_invariants()
+    }
+
+    /// Generates a tamper-evident cryptographic security audit certificate from current harness execution history.
+    pub fn generate_audit_certificate(
+        &self,
+        protocol_name: impl Into<String>,
+        contract_id: impl Into<String>,
+        target_network: impl Into<String>,
+    ) -> AuditCertificate {
+        AuditCertificate::generate(
+            protocol_name,
+            contract_id,
+            target_network,
+            self.state.ledger_sequence,
+            &self.step_history,
+        )
     }
 }
 
